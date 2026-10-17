@@ -34,7 +34,8 @@
     "hosts",
     "network",
     "mainland-china",
-    "gfw"
+    "gfw",
+    "linux"
   ],
   "license": "MIT",
   "engines": {

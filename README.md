@@ -24,7 +24,8 @@
 
 ```
 GitHub-Road/
-├── skills/GitHub-Road/  # Agent Skill（标准格式）：SKILL.md + files/（PowerShell 脚本）
+├── skills/GitHub-Road/        # Windows Agent Skill：SKILL.md + files/（PowerShell 脚本）
+├── skills/github-road-linux/  # Linux Agent Skill：SKILL.md + files/（bash + LD_PRELOAD shim）
 ├── install.sh               # 多智能体一键安装脚本
 ├── package.json             # DeepSeek Harness 插件包元数据（npm）
 ├── index.js                 # 插件入口（skills-only，无运行时代码）
@@ -85,6 +86,30 @@ bash install.sh --agent claude   # 或指定智能体
 
 ---
 
+## Linux 版（无需 root）/ Linux variant
+
+面向服务器 / HPC 集群节点等**没有 root**的 Linux 环境。核心逻辑与 Windows 版一致（实测择优 + 定时自愈），两处机制做了移植：
+
+- 改 `C:\...\hosts` → **`getaddrinfo` 的 `LD_PRELOAD` shim**（`libpin.so`，免 root）；
+- Windows 计划任务 → **`crontab`**（每 30 分钟）。
+- 额外增强：pin 文件每台主机保留**多个 IP**，作为 addrinfo **失败转移列表**，对抗封锁抖动。
+- 覆盖 **HTTPS 网页**与 **git over HTTPS 推送**。
+
+```bash
+# 方式一：一键安装（install.sh 会自动检测并安装 skills/ 下的全部技能）
+bash install.sh --agent opencode --user
+
+# 方式二：手动复制该技能目录，再运行其自带安装脚本
+cp -R skills/github-road-linux <你的技能目录>/
+bash <你的技能目录>/github-road-linux/files/install.sh
+```
+
+`files/install.sh` 会：编译 `libpin.so`、生成 `~/.hermes/github-pin`、向 `~/.bashrc` 写入幂等激活块、并添加每 30 分钟的 crontab 自愈。卸载：`bash files/uninstall.sh`。完整说明见 [`skills/github-road-linux/SKILL.md`](skills/github-road-linux/SKILL.md)。
+
+> ⚠️ 与 Windows 版不同的限制：本网络下 **SSH 推送（`ssh github.com` 22/443）无法修复**（端口整体超时/重置），请把远端改为 HTTPS。
+
+---
+
 ## 验证 / Verify
 
 ```powershell
@@ -97,7 +122,7 @@ schtasks /query /tn DSH-GitHubFix                           # 期望 Ready，Nex
 ## 已知限制 / Limitations（如实说明）
 
 - **gist.github.com**：SNI 被运营商层阻断，**所有 IP 都连不上**，hosts 无法修复，需要代理。
-- **codeload.github.com**（下载源码压缩包）、**ssh github.com:22**（Git 推送）、**GitHub Desktop 安装包**：不在本方案覆盖范围。Git 推送被墙请用 SSH over 443（见 dsh-GitRoad）。
+- **codeload.github.com**（下载源码压缩包）、**ssh github.com:22**（Git 推送）、**GitHub Desktop 安装包**：不在本方案覆盖范围。Windows 的 Git 推送被墙请用 SSH over 443（见 dsh-GitRoad）；Linux 无 root 环境请改用 HTTPS 远端（见上方「Linux 版」）。
 - **候选 IP 列表**是手工维护的；GitHub 的 Azure 段偶尔变化，全部失效时脚本自动回退 DNS 并提示。可更新脚本中 `$githubCandidates`（用 `nslookup github.com` + 逐 IP 实测 HTTP 200）。
 - **与 hosts 管理类工具互斥**：若机器装有 Watt Toolkit / Steam++（本地代理加速把 github 指到 127.0.0.1 并持续重写 hosts），会与本方案互相覆盖。需先停用其加速或退出（一键处理：`files/quit-watt-and-fix.ps1`），详见 SKILL.md 排查表 #16。
 - 若运营商升级为"对 github.com 全量封锁"，本方案会如实报告失败并建议代理——**不承诺万无一失**。

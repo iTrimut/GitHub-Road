@@ -1,3 +1,6 @@
 *.log
 .DS_Store
 Thumbs.db
+
+# Compiled LD_PRELOAD shim for the Linux skill (built by its install.sh)
+skills/github-road-linux/files/libpin.so

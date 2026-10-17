@@ -21,25 +21,24 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# --- locate the skill directory: flat repo (SKILL.md at root) or nested (skills/*/) ---
+# --- locate skill directory/directories: flat repo (SKILL.md at root) or nested (skills/*/) ---
+SKILL_SRCS=()
 if [[ -f "$HERE/SKILL.md" ]]; then
-  SKILL_SRC="$HERE"
+  SKILL_SRCS=( "$HERE" )
 else
   shopt -s nullglob
-  candidates=( "$HERE"/skills/*/SKILL.md )
-  if [[ ${#candidates[@]} -ge 1 ]]; then
-    SKILL_SRC="$(dirname "${candidates[0]}")"
-  else
+  for d in "$HERE"/skills/*/; do
+    [[ -f "$d/SKILL.md" ]] && SKILL_SRCS+=( "${d%/}" )
+  done
+  if [[ ${#SKILL_SRCS[@]} -eq 0 ]]; then
     echo "error: no SKILL.md found next to install.sh or under skills/." >&2
     exit 1
   fi
 fi
 
-SKILL_NAME="$(grep -m1 '^name:' "$SKILL_SRC/SKILL.md" | sed 's/^name:[[:space:]]*//' | tr -d '\r')"
-if [[ -z "$SKILL_NAME" ]]; then
-  echo "error: cannot read skill name from SKILL.md frontmatter." >&2
-  exit 1
-fi
+skill_name_of() { # $1 = skill dir -> echo frontmatter name
+  grep -m1 '^name:' "$1/SKILL.md" | sed 's/^name:[[:space:]]*//' | tr -d '\r'
+}
 
 # --- agent registry (parallel arrays; bash 3.2 compatible, works on macOS) ---
 AGENT_IDS=(    claude      dsh     cursor    windsurf  copilot    opencode  codex )
@@ -97,7 +96,9 @@ for i in "${!AGENT_IDS[@]}"; do
 done
 
 if [[ "$LIST" == "1" ]]; then
-  echo "skill: $SKILL_NAME (source: $SKILL_SRC)"
+  for s in "${SKILL_SRCS[@]}"; do
+    echo "skill: $(skill_name_of "$s") (source: $s)"
+  done
   if [[ ${#detected[@]} -eq 0 ]]; then
     echo "detected agents: none"
   else
@@ -110,7 +111,7 @@ AGENT="${FORCE:-${detected[0]:-}}"
 if [[ -z "$AGENT" ]]; then
   echo "error: no supported agent detected. Install manually into one of:" >&2
   for i in "${!AGENT_IDS[@]}"; do
-    printf '  %-24s ~/%s/%s/\n' "${AGENT_LABEL[$i]}" "${AGENT_USER[$i]}" "$SKILL_NAME" >&2
+    printf '  %-24s ~/%s/\n' "${AGENT_LABEL[$i]}" "${AGENT_USER[$i]}" >&2
   done
   exit 1
 fi
@@ -121,25 +122,41 @@ if [[ "$IDX" == "-1" ]]; then
 fi
 
 if [[ "$AGENT" == "dsh" ]]; then
-  DEST="$HOME/${AGENT_USER[$IDX]}/$SKILL_NAME"          # DSH is user-level only
+  ROOT="$HOME/${AGENT_USER[$IDX]}"          # DSH is user-level only
 elif [[ "$USERLEVEL" == "1" ]]; then
-  DEST="$HOME/${AGENT_USER[$IDX]}/$SKILL_NAME"
+  ROOT="$HOME/${AGENT_USER[$IDX]}"
 else
-  DEST="$PWD/${AGENT_PROJ[$IDX]}/$SKILL_NAME"
+  ROOT="$PWD/${AGENT_PROJ[$IDX]}"
 fi
 
-mkdir -p "$DEST"
-copied=0
-for item in SKILL.md references files; do
-  if [[ -e "$SKILL_SRC/$item" ]]; then
-    cp -R "$SKILL_SRC/$item" "$DEST/"
-    copied=1
+installed=()
+for s in "${SKILL_SRCS[@]}"; do
+  name="$(skill_name_of "$s")"
+  if [[ -z "$name" ]]; then
+    echo "warning: skipping $s (no 'name:' in SKILL.md frontmatter)" >&2
+    continue
   fi
+  DEST="$ROOT/$name"
+  mkdir -p "$DEST"
+  copied=0
+  for item in SKILL.md references files; do
+    if [[ -e "$s/$item" ]]; then
+      cp -R "$s/$item" "$DEST/"
+      copied=1
+    fi
+  done
+  if [[ "$copied" == "0" ]]; then
+    echo "warning: nothing to copy from $s" >&2
+    continue
+  fi
+  installed+=( "$name" )
 done
-if [[ "$copied" == "0" ]]; then
-  echo "error: nothing to copy from $SKILL_SRC" >&2
+
+if [[ ${#installed[@]} -eq 0 ]]; then
+  echo "error: no skill could be installed." >&2
   exit 1
 fi
 
-echo "installed '$SKILL_NAME' for ${AGENT_LABEL[$IDX]} -> $DEST"
+echo "installed ${#installed[@]} skill(s) for ${AGENT_LABEL[$IDX]} -> $ROOT:"
+for name in "${installed[@]}"; do echo "  - $name"; done
 echo "Restart/reload your agent, then mention the skill's trigger words to verify it loads."
